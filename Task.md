@@ -183,24 +183,17 @@ JOIN view_motion_detect_by_apartment vmotion ON vmotion.ts = venergy.ts AND vmot
 *Уточнение - база данных должна находится в том же хранилище, где и скрипт (т.е. находиться на одном сервере).*
 
 Структура физической таблицы будет следующая:
-
-incident_id (integer - primary key)
-
-ts (дата и время)
-
-building_id (ключ к таблице building)
-
-building (string)
-
-complex (string)
-
-apartment_id (ключ к таблице apartment)
-
-apartment_no (string)
-
-category (string)
-
-message (string)
+```
+- incident_id (integer - primary key)
+- ts (дата и время)
+- building_id (ключ к таблице building)
+- building (string)
+- complex (string)
+- apartment_id (ключ к таблице apartment)
+- apartment_no (string)
+- category (string)
+- message (string)
+```
 
 
 - **SQL-запросы, скрипты:** https://github.com/vefixx/UnicornDatabaseIncidentJournalScript/tree/master
@@ -212,16 +205,13 @@ message (string)
 Создадим представление (sql-запрос №1), которое сопоставляет все столбцы, относящиеся к качеству воздуха в помещении. Составим так называемую сводную таблицу, где строки будут столбцами. К базовым столбцам (ts, building_id, complex_id, apartment_id, apartment_no) добавим столбцы voc_index, co2_ppm, pm25_ug_m3 с их соответствующими значениями по квартире и дате.
 После этого создадим витрину данных (sql-запрос №2), где будем вычислять IAQI (Indoor Air Quality Index) для каждого значения. В качестве результата возьмем минимальный индекс и сверим с таблицей. В конце напишем запрос для обновления (sql-запрос №3)
 В столбце `status` витрины поставим одно из значений:
-
-`good` (значение 81-100)
-
-`moderate` (значение 61-80)
-
-`polluted` (значение 41-60)
-
-`very polluted` (значение 21-40)
-
-`severely polluted` (значение 0-20)
+```
+- good (значение 81-100)
+- moderate (значение 61-80)
+- polluted (значение 41-60)
+- very polluted (значение 21-40)
+- severely polluted (значение 0-20)
+```
 
 
 - **SQL-запросы, скрипты:**
@@ -366,16 +356,13 @@ FROM iaqi_min_result;
 - T - температура воздуха
 - RH - относительная влажность, представленная как десятичная дробь (процент влажности делится на 100%, например для 40% будет 0.4)
 Столбец `status` заполним по формуле:
-
-comfort zone (THI < 68)
-
-mild stress (THI 68-71)
-
-moderate stress (THI 72-79)
-
-severe stress (THI 80-89)
-
-danger zone (THI > 90)
+```
+- comfort zone (THI < 68)
+- mild stress (THI 68-71)
+- moderate stress (THI 72-79)
+- severe stress (THI 80-89)
+- danger zone (THI > 90)
+```
 
 - **SQL-запросы, скрипты:**
 **Создание представления сопоставление температуры и влажности (№1)**
