@@ -453,3 +453,39 @@ FROM result_cte
 ```
 - **Источники, скриншоты:** https://www.pericoli.com/en/temperature-humidity-index-what-you-need-to-know-about-it/
 <img width="908" height="233" alt="image" src="https://github.com/user-attachments/assets/e1a42b43-f6ff-4b81-a21e-402cd745e11f" />
+
+## Эффективность автоматизации вентиляции
+- **Описание решения:** построим промежуточное представление для сопоставления значения CO2 и вкл/выкл вентиляции (sql-запрос №1). Для расчета "эффективности" работы вентиляции в каждой квартире будем делать следующее (пример для конкретной квартиры):
+1. Найдем строки, где положение `vent_on` переходит 0 -> 1 (в результате у нас должно быть две строки: первая с `vent_on = 0` (строка `A`), а вторая с `vent_on = 1`
+2. Начиная со строки `A` будем идти вперед, пока не дойдем до `vent_on = 0` (то есть где `vent_on` переходит 1 -> 0). Конечную строку с `vent_on = 1` назовем строкой `B`
+3. Рассчитаем "эффективность" по формуле `(A.co2_ppm - B.co2_ppm) / A.co2_ppm * 100` = `efficiency_pct` (в %)
+4. Добавим в витрину новую строку, где в столбце `vent_start` будет записана дата и время включения вентиляции (`A.ts`), а в `vent_end` будет записана дата и время выключения (`B.ts`)
+5. И так продолжаем поиск следующего промежутка, начиная от строки `B`
+
+В результате мы получим, что если `efficiency_pct` > 0, то вентиляция сработала хорошо на `efficiency_pct` процентов. Если же `efficiency_pct` < 0, то вентиляция наоборот - сработала хуже на `efficiency_pct` процентов.
+Скриншот №1 показывает как обозначаются строки `A` и `B` при работе алгоритма для конкретной квартиры.
+- **SQL-запросы, скрипты:**
+
+**Промежуточное представление (№1)**
+```sql
+DROP VIEW IF EXISTS view_automation_efficiency;
+CREATE VIEW view_automation_efficiency AS
+    SELECT
+        m.ts,
+        b.complex_id,
+        d.building_id,
+        d.apartment_id,
+        a.apartment_no,
+        MAX(m.value_num) FILTER ( WHERE mt.code = 'co2_ppm' ) AS co2_ppm,
+        MAX(m.value_bool) FILTER ( WHERE mt.code = 'ventilation_on' ) AS vent_on
+    FROM measurement m
+JOIN device d ON d.device_id = m.device_id
+JOIN building b ON b.building_id = d.building_id
+JOIN apartment a ON a.apartment_id = d.apartment_id
+JOIN metric_type mt ON mt.metric_type_id = m.metric_type_id
+GROUP BY m.ts, b.complex_id, d.building_id, d.apartment_id, a.apartment_no
+```
+- **Источники, скриншоты:**
+
+**Пример строк работы вентиляции по алгоритму (№1)**
+<img width="1105" height="281" alt="image" src="https://github.com/user-attachments/assets/052f2253-5537-48ed-a093-1791d483b621" />
