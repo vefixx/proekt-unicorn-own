@@ -455,21 +455,41 @@ FROM result_cte
 <img width="908" height="233" alt="image" src="https://github.com/user-attachments/assets/e1a42b43-f6ff-4b81-a21e-402cd745e11f" />
 
 ## Эффективность автоматизации вентиляции
-- **Описание решения:** построим промежуточное представление для сопоставления значения CO2 и вкл/выкл вентиляции (sql-запрос №1). Для расчета "эффективности" работы вентиляции в каждой квартире будем делать следующее (пример для конкретной квартиры):
-1. Найдем строки, где положение `vent_on` переходит 0 -> 1 (в результате у нас должно быть две строки: первая с `vent_on = 0` (строка `A`), а вторая с `vent_on = 1`
-2. Начиная со строки `A` будем идти вперед, пока не дойдем до `vent_on = 0` (то есть где `vent_on` переходит 1 -> 0). Конечную строку с `vent_on = 1` назовем строкой `B`
-3. Рассчитаем "эффективность" по формуле `(A.co2_ppm - B.co2_ppm) / A.co2_ppm * 100` = `efficiency_pct` (в %)
-4. Добавим в витрину новую строку, где в столбце `vent_start` будет записана дата и время включения вентиляции (`A.ts`), а в `vent_end` будет записана дата и время выключения (`B.ts`)
-5. И так продолжаем поиск следующего промежутка, начиная от строки `B`
+- **Описание решения:** построим промежуточное представление для сопоставления значения CO2 и вкл/выкл вентиляции (sql-запрос №1). Для расчета "эффективности" работы вентиляции в каждой квартире будем делать следующее:
+1. Отсортируем строки по возрастанию `apartment_id`
+2. Найдем строки, где положение `vent_on` переходит 0 -> 1 (в результате у нас должно быть две строки: первая с `vent_on = 0` (строка `A`), а вторая с `vent_on = 1` - она нам не нужна.
+3. Начиная со строки `A` будем идти вперед, пока не дойдем до `vent_on = 0` (то есть где `vent_on` переходит 1 -> 0) или изменения `apartment_id`. Конечную строку с `vent_on = 1` назовем строкой `B`
+4. В промежутке от `A` до `B` (не включая `A`) найдем минимум значения `co2_ppm` - назовем `co2_ppm_min`
+5. Рассчитаем "эффективность" по формуле `(A.co2_ppm - co2_ppm_min) / A.co2_ppm * 100` = `efficiency_pct` (в %)
+6. Добавим в витрину новую строку, где в столбце `vent_on_ts` будет записана дата и время включения вентиляции (`A.ts`), а в `vent_off_ts` будет записана дата и время выключения (`B.ts`)
+7. И так продолжаем поиск следующего промежутка, начиная от строки `B`
 
 В результате мы получим, что если `efficiency_pct` > 0, то вентиляция сработала хорошо на `efficiency_pct` процентов. Если же `efficiency_pct` < 0, то вентиляция наоборот - сработала хуже на `efficiency_pct` процентов.
 Скриншот №1 показывает как обозначаются строки `A` и `B` при работе алгоритма для конкретной квартиры.
 - **SQL-запросы, скрипты:**
+Скрипт обновления витрины: https://github.com/vefixx/UnicornVentAutomationEfficiency
+
+**Структура витрины:**
+```sql
+CREATE TABLE IF NOT EXISTS m_vent_automation_efficiency (
+	vent_on_ts TEXT NOT NULL,
+	vent_off_ts TEXT NOT NULL,
+	building_id INTEGER NOT NULL,
+	complex_id TEXT NOT NULL,
+	apartment_id INTEGER NOT NULL,
+	apartment_no TEXT NOT NULL,
+	co2_ppm_min REAL NOT NULL,
+	efficiency_pct REAL NOT NULL,
+	duration_hours INTEGER NOT NULL,
+	FOREIGN KEY (building_id) REFERENCES building(building_id),
+	FOREIGN KEY (apartment_id) REFERENCES apartment(apartment_id)
+)
+```
 
 **Промежуточное представление (№1)**
 ```sql
-DROP VIEW IF EXISTS view_automation_efficiency;
-CREATE VIEW view_automation_efficiency AS
+DROP VIEW IF EXISTS view_vent_automation_efficiency;
+CREATE VIEW view_vent_automation_efficiency AS
     SELECT
         m.ts,
         b.complex_id,
