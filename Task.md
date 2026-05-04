@@ -454,58 +454,76 @@ FROM result_cte
 - **Источники, скриншоты:** https://www.pericoli.com/en/temperature-humidity-index-what-you-need-to-know-about-it/
 <img width="908" height="233" alt="image" src="https://github.com/user-attachments/assets/e1a42b43-f6ff-4b81-a21e-402cd745e11f" />
 
-## Эффективность автоматизации вентиляции
-- **Описание решения:** построим промежуточное представление для сопоставления значения CO2 и вкл/выкл вентиляции (sql-запрос №1). Для расчета "эффективности" работы вентиляции в каждой квартире будем делать следующее:
-1. Отсортируем строки по возрастанию `apartment_id`
-2. Найдем строки, где положение `vent_on` переходит 0 -> 1 (в результате у нас должно быть две строки: первая с `vent_on = 0` (строка `A`), а вторая с `vent_on = 1` - она нам не нужна.
-3. Начиная со строки `A` будем идти вперед, пока не дойдем до `vent_on = 0` (то есть где `vent_on` переходит 1 -> 0) или изменения `apartment_id`. Конечную строку с `vent_on = 1` назовем строкой `B`
-4. В промежутке от `A` до `B` (не включая `A`) найдем минимум значения `co2_ppm` - назовем `co2_ppm_min`
-5. Рассчитаем "эффективность" по формуле `(A.co2_ppm - co2_ppm_min) / A.co2_ppm * 100` = `efficiency_pct` (в %)
-6. Добавим в витрину новую строку, где в столбце `vent_on_ts` будет записана дата и время включения вентиляции (`A.ts`), а в `vent_off_ts` будет записана дата и время выключения (`B.ts`)
-7. И так продолжаем поиск следующего промежутка, начиная от строки `B`
+## Эффективность автоматизации
+- **Описание решения:** Будем использовать уже созданное представление `vw_presence_light_climate`. Создадим витрину данных `m_automation_efficiency` с группировкой данных по дням для каждой квартиры. Эффективность будет рассчитывать через долю неэффективных состояний. Проверять будем 4 сценария:
+1. `light_on_with_no_motion` - свет включён при отсутствии движения
+2. `dark_with_motion` — свет выключен, освещенность низкая (lux < 100) при наличии движения
+3. `thermostat_off_with_motion` - тремостат не работает, хотя в квартире присутствует движение
+4. `vent_on_with_low_co2` - работа вентиляции при нормальном уровне CO2 (co2 < 600)
 
-В результате мы получим, что если `efficiency_pct` > 0, то вентиляция сработала хорошо на `efficiency_pct` процентов. Если же `efficiency_pct` < 0, то вентиляция наоборот - сработала хуже на `efficiency_pct` процентов.
-Скриншот №1 показывает как обозначаются строки `A` и `B` при работе алгоритма для конкретной квартиры.
+Саму эффективность для каждого сценария будем рассчитывать по формуле: `efficiency_pct = 100.0 - (часы_с_неэффективным_состоянием / всего_часов_измерений * 100)`
 - **SQL-запросы, скрипты:**
-Скрипт обновления витрины: https://github.com/vefixx/UnicornVentAutomationEfficiency
-
-**Структура витрины:**
 ```sql
-CREATE TABLE IF NOT EXISTS m_vent_automation_efficiency (
-	vent_on_ts TEXT NOT NULL,
-	vent_off_ts TEXT NOT NULL,
-	building_id INTEGER NOT NULL,
-	complex_id TEXT NOT NULL,
-	apartment_id INTEGER NOT NULL,
-	apartment_no TEXT NOT NULL,
-	co2_ppm_min REAL NOT NULL,
-	efficiency_pct REAL NOT NULL,
-	duration_hours INTEGER NOT NULL,
-	FOREIGN KEY (building_id) REFERENCES building(building_id),
-	FOREIGN KEY (apartment_id) REFERENCES apartment(apartment_id)
-)
-```
+DROP TABLE IF EXISTS m_automation_efficiency;
+CREATE TABLE IF NOT EXISTS m_automation_efficiency
+(
+    date           TEXT NOT NULL,
+    complex_name   TEXT NOT NULL,
+    building_name  TEXT NOT NULL,
+    apartment_no   TEXT NOT NULL,
+    state          TEXT NOT NULL,
+    efficiency_pct REAL NOT NULL
+);
 
-**Промежуточное представление (№1)**
-```sql
-DROP VIEW IF EXISTS view_vent_automation_efficiency;
-CREATE VIEW view_vent_automation_efficiency AS
-    SELECT
-        m.ts,
-        b.complex_id,
-        d.building_id,
-        d.apartment_id,
-        a.apartment_no,
-        MAX(m.value_num) FILTER ( WHERE mt.code = 'co2_ppm' ) AS co2_ppm,
-        MAX(m.value_bool) FILTER ( WHERE mt.code = 'ventilation_on' ) AS vent_on
-    FROM measurement m
-JOIN device d ON d.device_id = m.device_id
-JOIN building b ON b.building_id = d.building_id
-JOIN apartment a ON a.apartment_id = d.apartment_id
-JOIN metric_type mt ON mt.metric_type_id = m.metric_type_id
-GROUP BY m.ts, b.complex_id, d.building_id, d.apartment_id, a.apartment_no
+-- light_on_with_no_motion
+INSERT INTO m_automation_efficiency (date, complex_name, building_name, apartment_no, state, efficiency_pct)
+SELECT DATE(ts)                  AS date,
+       complex_name,
+       building_name,
+       apartment_no,
+       'light_on_with_no_motion' AS state,
+       ROUND(100.0 - (
+                         CAST(SUM(CASE WHEN light_on = 1 AND motion_detected = 0 THEN 1 ELSE 0 END) AS REAL) /
+                         COUNT(*)) * 100.0, 1)
+FROM vw_presence_light_climate
+GROUP BY DATE(ts), complex_name, building_name, apartment_no;
+
+-- dark_with_motion
+INSERT INTO m_automation_efficiency (date, complex_name, building_name, apartment_no, state, efficiency_pct)
+SELECT DATE(ts)           AS date,
+       complex_name,
+       building_name,
+       apartment_no,
+       'dark_with_motion' AS state,
+       ROUND(100.0 -
+             (CAST(SUM(CASE WHEN motion_detected = 1 AND lux < 100 AND light_on = 0 THEN 1 ELSE 0 END) AS REAL) /
+              COUNT(*)) * 100.0, 1)
+FROM vw_presence_light_climate
+GROUP BY DATE(ts), complex_name, building_name, apartment_no;
+
+-- thermostat_off_with_motion
+INSERT INTO m_automation_efficiency (date, complex_name, building_name, apartment_no, state, efficiency_pct)
+SELECT DATE(ts)                     AS date,
+       complex_name,
+       building_name,
+       apartment_no,
+       'thermostat_off_with_motion' AS state,
+       ROUND(100.0 - (CAST(SUM(CASE WHEN motion_detected = 1 AND thermostat_mode = 'off' THEN 1 ELSE 0 END) AS REAL) /
+                      COUNT(*)) * 100.0, 1)
+FROM vw_presence_light_climate
+GROUP BY DATE(ts), complex_name, building_name, apartment_no;
+
+-- vent_on_with_low_co2
+INSERT INTO m_automation_efficiency (date, complex_name, building_name, apartment_no, state, efficiency_pct)
+SELECT DATE(ts)               AS date,
+       complex_name,
+       building_name,
+       apartment_no,
+       'vent_on_with_low_co2' AS state,
+       ROUND(100.0 -
+             (CAST(SUM(CASE WHEN ventilation_on = 1 AND co2_ppm < 600 THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100.0,
+             1)
+FROM vw_air_quality_status
+GROUP BY DATE(ts), complex_name, building_name, apartment_no;
 ```
 - **Источники, скриншоты:**
-
-**Пример строк работы вентиляции по алгоритму (№1)**
-<img width="1105" height="281" alt="image" src="https://github.com/user-attachments/assets/052f2253-5537-48ed-a093-1791d483b621" />
