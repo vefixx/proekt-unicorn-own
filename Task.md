@@ -14,43 +14,45 @@
 DROP VIEW IF EXISTS view_resource_consumption_hourly;
 CREATE VIEW view_resource_consumption_hourly AS
 WITH base_cte AS (
-	SELECT
-		m.measurement_id,
-		m.ts,
-		b.building_id,
-		c.name AS complex,
-		b.name AS building,
-		d.apartment_id,
-		a.apartment_no,
-		mt.code,
-		mt.unit,
-		m.value_num,
-		LAG(m.value_num) OVER (PARTITION BY d.device_id, mt.code ORDER BY m.ts) AS prev_value
-	FROM measurement m
-	JOIN device d ON d.device_id = m.device_id
-	JOIN building b ON b.building_id = d.building_id
-	JOIN complex c ON c.complex_id = b.complex_id
-	JOIN apartment a ON a.apartment_id = d.apartment_id
-	JOIN metric_type mt ON mt.metric_type_id = m.metric_type_id
-	WHERE mt.code IN ('water_cold_m3_total', 'water_hot_m3_total', 'electricity_kwh_total')
+    SELECT
+        m.measurement_id,
+        m.ts,
+        c.complex_id,
+        b.building_id,
+        c.name AS complex,
+        b.name AS building,
+        d.apartment_id,
+        a.apartment_no,
+        mt.code,
+        mt.unit,
+        m.value_num,
+        LAG(m.value_num) OVER (PARTITION BY d.device_id, mt.code ORDER BY m.ts) AS prev_value
+    FROM measurement m
+             JOIN device d ON d.device_id = m.device_id
+             JOIN building b ON b.building_id = d.building_id
+             JOIN complex c ON c.complex_id = b.complex_id
+             JOIN apartment a ON a.apartment_id = d.apartment_id
+             JOIN metric_type mt ON mt.metric_type_id = m.metric_type_id
+    WHERE mt.code IN ('water_cold_m3_total', 'water_hot_m3_total', 'electricity_kwh_total')
 )
 SELECT
-	measurement_id,
-	ts,
-	building_id,
-	complex,
-	building,
-	apartment_id,
-	apartment_no,
-	unit,
-	code,
-	CAST(ROUND(
-		CASE
-			WHEN prev_value IS NULL THEN 0
-			ELSE value_num - prev_value
-		END,
-		3
-	) AS REAL) AS value
+    measurement_id,
+    ts,
+    complex_id,
+    building_id,
+    complex,
+    building,
+    apartment_id,
+    apartment_no,
+    unit,
+    code,
+    CAST(ROUND(
+            CASE
+                WHEN prev_value IS NULL THEN 0
+                ELSE value_num - prev_value
+                END,
+            3
+         ) AS REAL) AS value
 FROM base_cte;
 ```
 - **Источники, скриншоты:** -
@@ -64,6 +66,7 @@ DROP VIEW IF EXISTS view_resource_consumption_daily;
 CREATE VIEW view_resource_consumption_daily AS
 SELECT
     DATE(ts) AS date,
+    complex_id,
     building_id,
     building,
     complex,
@@ -76,6 +79,7 @@ FROM view_resource_consumption_hourly
 GROUP BY
     DATE(ts),
     complex,
+    complex_id,
     building_id,
     building,
     apartment_id,
