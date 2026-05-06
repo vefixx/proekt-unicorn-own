@@ -534,15 +534,155 @@ GROUP BY DATE(ts), complex_name, building_name, apartment_no;
 
 # Направление 2А
 ## Агрегация данных час/день/неделя
-- **Описание решения:** Ключевыми метриками для построения витрин будут: потребление электроэнергии, холодной/горячей воды, CO2, влажность (%), поездки в лифте, IAQI-индекс, THI-индекс. Потребление электроэнергии и холодной/горячей воды в исходной таблице `measurement` являются накопительными, поэтому будем использовать в качестве источника представление из направления 1А - `view_resource_consumption_hourly`, которое отображает потребление за час. Для поездок в лифте (они тоже являются накопительными) создадим похожее представление.
+- **Описание решения:** Ключевыми метриками для построения витрин будут: потребление электроэнергии, холодной/горячей воды, CO2, влажность (%), поездки в лифте, температура помещения. Потребление электроэнергии и холодной/горячей воды в исходной таблице `measurement` являются накопительными, поэтому будем использовать в качестве источника представление из направления 1А - `view_resource_consumption_hourly`, которое отображает потребление за час. Для поездок в лифте (они тоже являются накопительными) создадим похожее представление.
 
-Для решения создадим 3 витрины для всех метрик:
-1. Агрегация данных по часам
-2. Агрегация данных за дням
-3. Агрегация данных по неделям
+Для решения создадим 6 витрины для всех метрик:
+1. Агрегация данных по часам (для квартир) - столбцы **`ts`**, `complex_id`, `complex`, `building_id`, `building`, `apartment_id`, `apartment_no`, `metric`, `unit`, **`value`**
+2. Агрегация данных за дням (для квартир)  - столбцы **`date`**, `complex_id`, `complex`, `building_id`, `building`, `apartment_id`, `apartment_no`, `metric`, `unit`, **`value_avg`**, **`value_min`**, **`value_max`**, **`value_sum`**
+3. Агрегация данных по неделям (для квартир)  - столбцы **`year_week`**, `complex_id`, `complex`, `building_id`, `building`, `apartment_id`, `apartment_no`, `metric`, `unit`, **`value_avg`**, **`value_min`**, **`value_max`**, **`value_sum`**
 
-**Агрегацию по дням** реализуем группировкой строк по `date`, где `date` - результат функции `DATE(ts)`.
+и еще 3 таких же витрин для зданий, где вместо стобцов `complex_id, complex, building_id, building, apartment_id, apartment_no` будут `complex_id, complex, building_id, building` и группировка будет производиться по столбцу `building_id`
 
-**Агрегацию по неделям** сделаем с помощью группировки строк уже по результату функции `strftime('%Y-%W', ts) AS week_key`, которая возращает строку в формате `год-неделя_года`.
+**Агрегацию по дням** реализуем группировкой строк по `date`, где `date` - результат функции `DATE(ts)`. Данные будем брать из витрины агрегации по часам.
+
+**Агрегацию по неделям** сделаем с помощью группировки строк по результату функции `strftime('%Y-%W', ts) AS year_week`, которая возращает строку в формате `год-неделя_года`. Данные так же будем брать из витрины агрегации по часам.
+
 - **SQL-запросы, скрипты:**
+
+**SQL-запрос создания витрины часовой агрегации (квартиры)**
+```sql
+CREATE TABLE IF NOT EXISTS m_stats_hourly_by_apartment
+(
+    ts           TEXT    NOT NULL,
+    complex_id   INTEGER NOT NULL,
+    complex      TEXT    NOT NULL,
+    building_id  INTEGER NOT NULL,
+    building     TEXT    NOT NULL,
+    apartment_id INTEGER NOT NULL,
+    apartment_no TEXT    NOT NULL,
+    metric       TEXT    NOT NULL,
+    unit         TEXT    NOT NULL,
+    value        REAL    NOT NULL,
+    FOREIGN KEY (complex_id) REFERENCES complex (complex_id),
+    FOREIGN KEY (apartment_id) REFERENCES apartment (apartment_id),
+    FOREIGN KEY (building_id) REFERENCES building (building_id),
+    UNIQUE (ts, apartment_id, metric)
+);
+```
+
+**SQL-запрос создания витрины дневной агрегации (квартиры)**
+```sql
+CREATE TABLE IF NOT EXISTS m_stats_daily_by_apartment
+(
+    date         TEXT    NOT NULL,
+    complex_id   INTEGER NOT NULL,
+    complex      TEXT    NOT NULL,
+    building_id  INTEGER NOT NULL,
+    building     TEXT    NOT NULL,
+    apartment_id INTEGER NOT NULL,
+    apartment_no TEXT    NOT NULL,
+    metric       TEXT    NOT NULL,
+    unit         TEXT    NOT NULL,
+    value_avg    REAL,
+    value_min    REAL,
+    value_max    REAL,
+    value_sum    REAL,
+    FOREIGN KEY (complex_id) REFERENCES complex (complex_id),
+    FOREIGN KEY (apartment_id) REFERENCES apartment (apartment_id),
+    FOREIGN KEY (building_id) REFERENCES building (building_id),
+    UNIQUE (date, apartment_id, metric)
+);
+```
+
+**SQL-запрос создания витрины недельной агрегации (квартиры)**
+```sql
+CREATE TABLE IF NOT EXISTS m_stats_weekly_by_apartment
+(
+    year_week    TEXT    NOT NULL,
+    complex_id   INTEGER NOT NULL,
+    complex      TEXT    NOT NULL,
+    building_id  INTEGER NOT NULL,
+    building     TEXT    NOT NULL,
+    apartment_id INTEGER NOT NULL,
+    apartment_no TEXT    NOT NULL,
+    metric       TEXT    NOT NULL,
+    unit         TEXT    NOT NULL,
+    value_avg    REAL,
+    value_min    REAL,
+    value_max    REAL,
+    value_sum    REAL,
+    FOREIGN KEY (complex_id) REFERENCES complex (complex_id),
+    FOREIGN KEY (apartment_id) REFERENCES apartment (apartment_id),
+    FOREIGN KEY (building_id) REFERENCES building (building_id),
+    UNIQUE (year_week, apartment_id, metric)
+);
+```
+
+**SQL-запрос заполнения витрины часовой агрегации (квартиры)**
+```sql
+-- view_resource_consumption_hourly
+INSERT OR REPLACE INTO m_stats_hourly_by_apartment (ts, complex_id, complex, building_id, building, apartment_id, apartment_no, metric, unit, value)
+SELECT ts, complex_id, complex, building_id, building, apartment_id, apartment_no, code, unit, value
+FROM view_resource_consumption_hourly v;
+
+-- measurement
+INSERT OR REPLACE INTO m_stats_hourly_by_apartment (ts, complex_id, complex, building_id, building, apartment_id, apartment_no, metric, unit, value)
+SELECT m.ts, c.complex_id,c.name, b.building_id, b.name, a.apartment_id, a.apartment_no, mt.code, mt.unit, m.value_num
+FROM measurement m
+         JOIN device d ON m.device_id = d.device_id
+         JOIN building b ON d.building_id = b.building_id
+         JOIN complex c ON b.complex_id = c.complex_id
+         JOIN apartment a ON a.apartment_id = d.apartment_id
+         JOIN metric_type mt ON m.metric_type_id = mt.metric_type_id
+WHERE mt.code IN ('co2_ppm', 'humidity_pct', 'room_temp_c');
+```
+
+
+**SQL-запрос заполнения витрины дневной агрегации (квартиры)**
+```sql
+INSERT OR
+REPLACE INTO m_stats_daily_by_apartment (date, complex_id, complex, building_id, building, apartment_id, apartment_no,
+                                         metric, unit, value_avg, value_min, value_max, value_sum)
+SELECT DATE(m.ts),
+       m.complex_id,
+       m.complex,
+       m.building_id,
+       m.building,
+       m.apartment_id,
+       m.apartment_no,
+       m.metric,
+       m.unit,
+       ROUND(AVG(m.value), 3),
+       ROUND(MIN(m.value), 3),
+       ROUND(MAX(m.value), 3),
+        CASE WHEN m.metric IN ('co2_ppm', 'humidity_pct', 'room_temp_c') THEN NULL ELSE ROUND(SUM(m.value), 3) END
+FROM m_stats_hourly_by_apartment m
+GROUP BY DATE(m.ts), m.complex_id, m.complex, m.building_id, m.building, m.apartment_id, m.apartment_no, m.metric,
+         m.unit;
+```
+
+
+**SQL-запрос заполнения витрины недельной агрегации (квартиры)**
+```sql
+INSERT OR
+REPLACE INTO m_stats_weekly_by_apartment (year_week, complex_id, complex, building_id, building, apartment_id, apartment_no,
+                                         metric, unit, value_avg, value_min, value_max, value_sum)
+SELECT strftime('%Y-%W', ts) AS year_week,
+       m.complex_id,
+       m.complex,
+       m.building_id,
+       m.building,
+       m.apartment_id,
+       m.apartment_no,
+       m.metric,
+       m.unit,
+       ROUND(AVG(m.value), 3),
+       ROUND(MIN(m.value), 3),
+       ROUND(MAX(m.value), 3),
+       CASE WHEN m.metric IN ('co2_ppm', 'humidity_pct', 'room_temp_c') THEN NULL ELSE ROUND(SUM(m.value), 3) END
+FROM m_stats_hourly_by_apartment m
+GROUP BY strftime('%Y-%W', ts), m.complex_id, m.complex, m.building_id, m.building, m.apartment_id, m.apartment_no, m.metric,
+         m.unit;
+```
+
 - **Источники, скриншоты:**
