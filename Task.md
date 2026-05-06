@@ -620,13 +620,15 @@ CREATE TABLE IF NOT EXISTS m_stats_weekly_by_apartment
 
 **SQL-запрос заполнения витрины часовой агрегации (квартиры)**
 ```sql
+DELETE FROM m_stats_hourly_by_apartment;
+
 -- view_resource_consumption_hourly
-INSERT OR REPLACE INTO m_stats_hourly_by_apartment (ts, complex_id, complex, building_id, building, apartment_id, apartment_no, metric, unit, value)
+INSERT INTO m_stats_hourly_by_apartment (ts, complex_id, complex, building_id, building, apartment_id, apartment_no, metric, unit, value)
 SELECT ts, complex_id, complex, building_id, building, apartment_id, apartment_no, code, unit, value
 FROM view_resource_consumption_hourly v;
 
 -- measurement
-INSERT OR REPLACE INTO m_stats_hourly_by_apartment (ts, complex_id, complex, building_id, building, apartment_id, apartment_no, metric, unit, value)
+INSERT INTO m_stats_hourly_by_apartment (ts, complex_id, complex, building_id, building, apartment_id, apartment_no, metric, unit, value)
 SELECT m.ts, c.complex_id,c.name, b.building_id, b.name, a.apartment_id, a.apartment_no, mt.code, mt.unit, m.value_num
 FROM measurement m
          JOIN device d ON m.device_id = d.device_id
@@ -640,8 +642,9 @@ WHERE mt.code IN ('co2_ppm', 'humidity_pct', 'room_temp_c');
 
 **SQL-запрос заполнения витрины дневной агрегации (квартиры)**
 ```sql
-INSERT OR
-REPLACE INTO m_stats_daily_by_apartment (date, complex_id, complex, building_id, building, apartment_id, apartment_no,
+DELETE FROM m_stats_daily_by_apartment;
+
+INSERT INTO m_stats_daily_by_apartment (date, complex_id, complex, building_id, building, apartment_id, apartment_no,
                                          metric, unit, value_avg, value_min, value_max, value_sum)
 SELECT DATE(m.ts),
        m.complex_id,
@@ -664,8 +667,9 @@ GROUP BY DATE(m.ts), m.complex_id, m.complex, m.building_id, m.building, m.apart
 
 **SQL-запрос заполнения витрины недельной агрегации (квартиры)**
 ```sql
-INSERT OR
-REPLACE INTO m_stats_weekly_by_apartment (year_week, complex_id, complex, building_id, building, apartment_id, apartment_no,
+DELETE FROM m_stats_weekly_by_apartment;
+
+INSERT INTO m_stats_weekly_by_apartment (year_week, complex_id, complex, building_id, building, apartment_id, apartment_no,
                                          metric, unit, value_avg, value_min, value_max, value_sum)
 SELECT strftime('%Y-%W', ts) AS year_week,
        m.complex_id,
