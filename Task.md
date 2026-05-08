@@ -689,4 +689,70 @@ GROUP BY strftime('%Y-%W', ts), m.complex_id, m.complex, m.building_id, m.buildi
          m.unit;
 ```
 
+**SQL-запрос создания витрины часовой агрегации (здания)**
+```sql
+DROP TABLE IF EXISTS m_stats_hourly_by_building;
+CREATE TABLE IF NOT EXISTS m_stats_hourly_by_building
+(
+    ts           TEXT    NOT NULL,
+    complex_id   INTEGER NOT NULL,
+    complex      TEXT    NOT NULL,
+    building_id  INTEGER NOT NULL,
+    building     TEXT    NOT NULL,
+    metric       TEXT    NOT NULL,
+    unit         TEXT    NOT NULL,
+    value_avg    REAL,
+    value_min    REAL,
+    value_max    REAL,
+    value_sum    REAL,
+    FOREIGN KEY (complex_id) REFERENCES complex (complex_id),
+    FOREIGN KEY (building_id) REFERENCES building (building_id),
+    UNIQUE (ts, building_id, metric)
+);
+```
+
+**SQL-запрос создания витрины дневной агрегации (здания)**
+```sql
+DROP TABLE IF EXISTS m_stats_daily_by_building;
+CREATE TABLE IF NOT EXISTS m_stats_daily_by_building
+(
+    date         TEXT    NOT NULL,
+    complex_id   INTEGER NOT NULL,
+    complex      TEXT    NOT NULL,
+    building_id  INTEGER NOT NULL,
+    building     TEXT    NOT NULL,
+    metric       TEXT    NOT NULL,
+    unit         TEXT    NOT NULL,
+    value_avg    REAL,
+    value_min    REAL,
+    value_max    REAL,
+    value_sum    REAL,
+    FOREIGN KEY (complex_id) REFERENCES complex (complex_id),
+    FOREIGN KEY (building_id) REFERENCES building (building_id),
+    UNIQUE (date, building_id, metric)
+);
+```
+
+**SQL-запрос создания витрины недельной агрегации (здания)**
+```sql
+DROP TABLE IF EXISTS m_stats_weekly_by_building;
+CREATE TABLE IF NOT EXISTS m_stats_weekly_by_building
+(
+    year_week    TEXT    NOT NULL,
+    complex_id   INTEGER NOT NULL,
+    complex      TEXT    NOT NULL,
+    building_id  INTEGER NOT NULL,
+    building     TEXT    NOT NULL,
+    metric       TEXT    NOT NULL,
+    unit         TEXT    NOT NULL,
+    value_avg    REAL,
+    value_min    REAL,
+    value_max    REAL,
+    value_sum    REAL,
+    FOREIGN KEY (complex_id) REFERENCES complex (complex_id),
+    FOREIGN KEY (building_id) REFERENCES building (building_id),
+    UNIQUE (year_week, building_id, metric)
+);
+```
+
 - **Источники, скриншоты:**
