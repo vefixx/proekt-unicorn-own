@@ -755,4 +755,70 @@ CREATE TABLE IF NOT EXISTS m_stats_weekly_by_building
 );
 ```
 
+**SQL-запрос заполнения витрины часовой агрегации (квартиры)**
+```sql
+DELETE
+FROM m_stats_hourly_by_building;
+
+INSERT INTO m_stats_hourly_by_building (ts, complex_id, complex, building_id, building, metric, unit, value_avg,
+                                        value_min, value_max, value_sum)
+SELECT ts,
+       complex_id,
+       complex,
+       building_id,
+       building,
+       metric,
+       unit,
+       ROUND(AVG(v.value), 3),
+       ROUND(MIN(v.value), 3),
+       ROUND(MAX(v.value), 3),
+       CASE WHEN v.metric IN ('co2_ppm', 'humidity_pct', 'room_temp_c') THEN NULL ELSE ROUND(SUM(v.value), 3) END
+FROM m_stats_hourly_by_apartment v
+GROUP BY ts, complex_id, building_id, metric, unit;
+```
+
+**SQL-запрос заполнения витрины дневной агрегации (квартиры)**
+```sql
+DELETE FROM m_stats_daily_by_building;
+
+INSERT INTO m_stats_daily_by_building (date, complex_id, complex, building_id, building,
+                                        metric, unit, value_avg, value_min, value_max, value_sum)
+SELECT DATE(m.ts),
+       m.complex_id,
+       m.complex,
+       m.building_id,
+       m.building,
+       m.metric,
+       m.unit,
+       ROUND(AVG(m.value), 3),
+       ROUND(MIN(m.value), 3),
+       ROUND(MAX(m.value), 3),
+       CASE WHEN m.metric IN ('co2_ppm', 'humidity_pct', 'room_temp_c') THEN NULL ELSE ROUND(SUM(m.value), 3) END
+FROM m_stats_hourly_by_apartment m
+GROUP BY DATE(ts), complex_id, building_id, metric, unit;
+```
+
+**SQL-запрос заполнения витрины недельной агрегации (квартиры)**
+```sql
+DELETE
+FROM m_stats_weekly_by_building;
+
+INSERT INTO m_stats_weekly_by_building (year_week, complex_id, complex, building_id, building,
+                                         metric, unit, value_avg, value_min, value_max, value_sum)
+SELECT strftime('%Y-%W', ts) AS year_week,
+       m.complex_id,
+       m.complex,
+       m.building_id,
+       m.building,
+       m.metric,
+       m.unit,
+       ROUND(AVG(m.value), 3),
+       ROUND(MIN(m.value), 3),
+       ROUND(MAX(m.value), 3),
+       CASE WHEN m.metric IN ('co2_ppm', 'humidity_pct', 'room_temp_c') THEN NULL ELSE ROUND(SUM(m.value), 3) END
+FROM m_stats_hourly_by_apartment m
+GROUP BY strftime('%Y-%W', ts), complex_id, building_id, metric, unit;
+```
+
+
 - **Источники, скриншоты:**
