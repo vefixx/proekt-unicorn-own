@@ -549,6 +549,48 @@ GROUP BY DATE(ts), complex_name, building_name, apartment_no;
 
 - **SQL-запросы, скрипты:**
 
+**Представление поездок в лифте за прошедший час**
+```sql
+DROP VIEW IF EXISTS view_elevator_trips_hourly;
+CREATE VIEW view_elevator_trips_hourly AS
+WITH base_cte AS (
+    SELECT
+        m.measurement_id,
+        m.ts,
+        c.complex_id,
+        b.building_id,
+        c.name AS complex,
+        b.name AS building,
+        mt.code,
+        mt.unit,
+        m.value_num,
+        LAG(m.value_num) OVER (PARTITION BY d.device_id, mt.code ORDER BY m.ts) AS prev_value
+    FROM measurement m
+             JOIN device d ON d.device_id = m.device_id
+             JOIN building b ON b.building_id = d.building_id
+             JOIN complex c ON c.complex_id = b.complex_id
+             JOIN metric_type mt ON mt.metric_type_id = m.metric_type_id
+    WHERE mt.code = 'elevator_trips_total'
+)
+SELECT
+    measurement_id,
+    ts,
+    complex_id,
+    building_id,
+    complex,
+    building,
+    unit,
+    code,
+    CAST(ROUND(
+            CASE
+                WHEN prev_value IS NULL THEN 0
+                ELSE value_num - prev_value
+                END,
+            3
+         ) AS REAL) AS value
+FROM base_cte;
+```
+
 **SQL-запрос создания витрины часовой агрегации (квартиры)**
 ```sql
 CREATE TABLE IF NOT EXISTS m_stats_hourly_by_apartment
@@ -745,7 +787,7 @@ CREATE TABLE IF NOT EXISTS m_stats_weekly_by_building
     building     TEXT    NOT NULL,
     metric       TEXT    NOT NULL,
     unit         TEXT    NOT NULL,
-    value_avg    REAL,
+    value_avg    REAL,	
     value_min    REAL,
     value_max    REAL,
     value_sum    REAL,
@@ -755,11 +797,12 @@ CREATE TABLE IF NOT EXISTS m_stats_weekly_by_building
 );
 ```
 
-**SQL-запрос заполнения витрины часовой агрегации (квартиры)**
+**SQL-запрос заполнения витрины часовой агрегации (здания)**
 ```sql
 DELETE
 FROM m_stats_hourly_by_building;
 
+-- m_stats_hourly_by_apartment
 INSERT INTO m_stats_hourly_by_building (ts, complex_id, complex, building_id, building, metric, unit, value_avg,
                                         value_min, value_max, value_sum)
 SELECT ts,
@@ -775,48 +818,64 @@ SELECT ts,
        CASE WHEN v.metric IN ('co2_ppm', 'humidity_pct', 'room_temp_c') THEN NULL ELSE ROUND(SUM(v.value), 3) END
 FROM m_stats_hourly_by_apartment v
 GROUP BY ts, complex_id, building_id, metric, unit;
+
+-- view_elevator_trips_hourly
+INSERT INTO m_stats_hourly_by_building (ts, complex_id, complex, building_id, building, metric, unit, value_avg, value_min, value_max, value_sum)
+SELECT ts,
+       complex_id,
+       complex,
+       building_id,
+       building,
+       code,
+       unit,
+       ROUND(SUM(value), 3),
+       ROUND(SUM(value), 3),
+       ROUND(SUM(value), 3),
+       ROUND(SUM(value), 3)
+FROM view_elevator_trips_hourly
+GROUP BY ts, complex_id, building_id, code, unit;
 ```
 
-**SQL-запрос заполнения витрины дневной агрегации (квартиры)**
+**SQL-запрос заполнения витрины дневной агрегации (здания)**
 ```sql
 DELETE FROM m_stats_daily_by_building;
 
-INSERT INTO m_stats_daily_by_building (date, complex_id, complex, building_id, building,
-                                        metric, unit, value_avg, value_min, value_max, value_sum)
-SELECT DATE(m.ts),
-       m.complex_id,
-       m.complex,
-       m.building_id,
-       m.building,
-       m.metric,
-       m.unit,
-       ROUND(AVG(m.value), 3),
-       ROUND(MIN(m.value), 3),
-       ROUND(MAX(m.value), 3),
-       CASE WHEN m.metric IN ('co2_ppm', 'humidity_pct', 'room_temp_c') THEN NULL ELSE ROUND(SUM(m.value), 3) END
-FROM m_stats_hourly_by_apartment m
+INSERT INTO m_stats_daily_by_building (date, complex_id, complex, building_id, building, metric, unit, value_avg, value_min, value_max, value_sum)
+SELECT
+    DATE(ts),
+    complex_id,
+    complex,
+    building_id,
+    building,
+    metric,
+    unit,
+    ROUND(AVG(value_avg), 3),
+    ROUND(MIN(value_min), 3),
+    ROUND(MAX(value_max), 3),
+    ROUND(SUM(value_sum), 3)
+FROM m_stats_hourly_by_building
 GROUP BY DATE(ts), complex_id, building_id, metric, unit;
 ```
 
-**SQL-запрос заполнения витрины недельной агрегации (квартиры)**
+**SQL-запрос заполнения витрины недельной агрегации (здания)**
 ```sql
 DELETE
 FROM m_stats_weekly_by_building;
 
-INSERT INTO m_stats_weekly_by_building (year_week, complex_id, complex, building_id, building,
-                                         metric, unit, value_avg, value_min, value_max, value_sum)
-SELECT strftime('%Y-%W', ts) AS year_week,
-       m.complex_id,
-       m.complex,
-       m.building_id,
-       m.building,
-       m.metric,
-       m.unit,
-       ROUND(AVG(m.value), 3),
-       ROUND(MIN(m.value), 3),
-       ROUND(MAX(m.value), 3),
-       CASE WHEN m.metric IN ('co2_ppm', 'humidity_pct', 'room_temp_c') THEN NULL ELSE ROUND(SUM(m.value), 3) END
-FROM m_stats_hourly_by_apartment m
+INSERT INTO m_stats_weekly_by_building (year_week, complex_id, complex, building_id, building, metric, unit, value_avg,
+                                        value_min, value_max, value_sum)
+SELECT strftime('%Y-%W', ts),
+       complex_id,
+       complex,
+       building_id,
+       building,
+       metric,
+       unit,
+       ROUND(AVG(value_avg), 3),
+       ROUND(MIN(value_min), 3),
+       ROUND(MAX(value_max), 3),
+       ROUND(SUM(value_sum), 3)
+FROM m_stats_hourly_by_building
 GROUP BY strftime('%Y-%W', ts), complex_id, building_id, metric, unit;
 ```
 
